@@ -1017,81 +1017,10 @@ function WatchTab() {
   //        回答这个会话是不是在「刷B站 设置里的 workspace」（默认 D:/hajimi）那个工作区里；
   //      · 是 ⇒ 注册「刷过的视频」；不是 ⇒ 立刻撤销（tab 跟着消失）。
   //    这样：hajimi 工作区里的会话有 tab，别的会话（比如 default-workspace）没有。
-  try {
-    let viewOff = null
-    let viewSlotReady = false
-    const dropView = () => {
-      if (!viewOff) return
-      try { viewOff() } catch { /* 已经撤过了 */ }
-      viewOff = null
-    }
-    const ensureView = () => {
-      if (viewOff || !viewSlotReady) return
-      try {
-        viewOff = slots.register({
-          name: 'conversation.view',
-          id: 'bili-watched',
-          order: 20,
-          label: '刷过的视频',
-          scope: 'session',
-        }, () => h(WatchTab))
-      } catch (e) { viewOff = null }
-    }
-    // 槽位就绪之前 register 会被拒；inject 的回调就是"槽位已经在了"的信号
-    let lastInScope = false
-    slots.inject('conversation.view', () => {
-      viewSlotReady = true
-      if (lastInScope) ensureView()   // 探针比槽位先跑完的情况：补一次
-      return () => { viewSlotReady = false; dropView() }
-    })
-    const ScopeProbe = ({ sessionId }) => {
-      const [nonce, setNonce] = React.useState(0)
-      // 订阅 bumpScope：设置变了 / 窗口回到前台 / 15 秒兜底轮询 ⇒ 重查一次
-      React.useEffect(() => {
-        const fn = () => setNonce((n) => n + 1)
-        scopeSubs.add(fn)
-        return () => { scopeSubs.delete(fn) }
-      }, [])
-      React.useEffect(() => {
-        const t = setInterval(() => bumpScope(), 15_000)
-        t.unref?.()
-        return () => clearInterval(t)
-      }, [])
-      React.useEffect(() => {
-        const sid = String(sessionId || '')
-        // 拿不到 sessionId（槽位没给 / 老版本）：退回老行为 —— 照常显示，别把 tab 弄没了
-        if (!sid) { lastInScope = true; ensureView(); return () => {} }
-        const hit = scopeCache.get(sid)
-        if (hit && Date.now() - hit.at < SCOPE_TTL) {
-          if (hit.v) { lastInScope = true; ensureView() } else dropView()
-          return () => {}
-        }
-        // 没缓存 / 缓存过期：先收起来（宁可晚一帧出现，也别让 tab 在别的会话上闪），再问宿主
-        dropView()
-        let alive = true
-        jget('/session-scope?session=' + encodeURIComponent(sid))
-          .then((r) => {
-            if (!alive) return
-            // 老宿主没有这个接口（r.ok 不是 true）⇒ 退回老行为，别静默把 tab 藏掉
-            if (!r || r.ok !== true) { lastInScope = true; scopeCache.set(sid, { v: true, at: Date.now() }); ensureView(); return }
-            const inScope = Boolean(r.match)
-            lastInScope = inScope
-            scopeCache.set(sid, { v: inScope, at: Date.now() })
-            if (inScope) ensureView(); else dropView()
-          })
-          .catch(() => { if (alive) { lastInScope = true; scopeCache.set(sid, { v: true, at: Date.now() }); ensureView() } })
-        return () => { alive = false }
-      }, [sessionId, nonce])
-      // 探针被卸载（切到没有会话的首页 / 别的面板）⇒ 把 tab 收起来
-      React.useEffect(() => () => { dropView() }, [])
-      return h('span', { 'data-bd-probe': '', style: { display: 'none' } })
-    }
-    slots.inject('conversation.input.left', () => slots.register({
-      name: 'conversation.input.left',
-      id: 'bili-scope',
-      order: 5,
-    }, (props) => h(ScopeProbe, props || {})))
-  } catch (e) { /* 没有这些槽位就算了 */ }
+  // 2026-11-07 Yuki 要求：移除会话头的「刷过的视频」tab。
+  // WatchTab 组件与 /watched 数据接口保留，设置页里的列表仍可用；
+  // 仅不再向 conversation.view 槽注册，也不装 workspace 探针。
+
       },
     }
   },
